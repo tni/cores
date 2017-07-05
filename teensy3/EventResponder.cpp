@@ -33,10 +33,8 @@
 
 #include "EventResponder.h"
 
-EventResponder * EventResponder::firstYield = nullptr;
-EventResponder * EventResponder::lastYield = nullptr;
-EventResponder * EventResponder::firstInterrupt = nullptr;
-EventResponder * EventResponder::lastInterrupt = nullptr;
+decltype(EventResponder::_responders_yield) EventResponder::_responders_yield = {};
+decltype(EventResponder::_responders_interrupt) EventResponder::_responders_interrupt = {};
 bool EventResponder::runningFromYield = false;
 
 // TODO: interrupt disable/enable needed in many places!!!
@@ -48,6 +46,8 @@ void EventResponder::triggerEventNotImmediate()
 		return;
 	}
 	if (_type == EventTypeYield) {
+		EventResponder *&firstYield = _responders_yield[_priority].first;
+		EventResponder *&lastYield = _responders_yield[_priority].last;
 		// normal type, called from yield()
 		if (firstYield == nullptr) {
 			_next = nullptr;
@@ -60,6 +60,8 @@ void EventResponder::triggerEventNotImmediate()
 			lastYield = this;
 		}
 	} else if (_type == EventTypeInterrupt) {
+		EventResponder *&firstInterrupt = _responders_interrupt[_priority].first;
+		EventResponder *&lastInterrupt = _responders_interrupt[_priority].last;
 		// interrupt, called from software interrupt
 		if (firstInterrupt == nullptr) {
 			_next = nullptr;
@@ -85,6 +87,17 @@ void pendablesrvreq_isr(void)
 
 void EventResponder::runFromInterrupt()
 {
+	// TODO: only a single callback should be run for the lower priorities and
+	// then the higher priorities should be checked again.
+	runFromInterrupt(PriorityHigh);
+	runFromInterrupt(PriorityMedium);
+	runFromInterrupt(PriorityLow);
+}
+
+void EventResponder::runFromInterrupt(EventPriority priority)
+{
+	EventResponder *&firstInterrupt = _responders_interrupt[priority].first;
+	EventResponder *&lastInterrupt = _responders_interrupt[priority].last;
 	for (EventResponder *first=firstInterrupt; first; first = first->_next) {
 		first->_pending = false;
 		(*(first->_function))(*first);
@@ -97,6 +110,8 @@ bool EventResponder::clearEvent()
 {
 	if (_pending) {
 		if (_type == EventTypeYield) {
+			EventResponder *&firstYield = _responders_yield[_priority].first;
+			EventResponder *&lastYield = _responders_yield[_priority].last;
 			if (_prev) {
 				_prev->_next = _next;
 			} else {
@@ -108,6 +123,8 @@ bool EventResponder::clearEvent()
 				lastYield = _prev;
 			}
 		} else if (_type == EventTypeInterrupt) {
+			EventResponder *&firstInterrupt = _responders_interrupt[_priority].first;
+			EventResponder *&lastInterrupt = _responders_interrupt[_priority].last;
 			if (_prev) {
 				_prev->_next = _next;
 			} else {
@@ -128,6 +145,8 @@ bool EventResponder::clearEvent()
 void EventResponder::detach()
 {
 	if (_type == EventTypeYield) {
+		EventResponder *&firstYield = _responders_yield[_priority].first;
+		EventResponder *&lastYield = _responders_yield[_priority].last;
 		if (_pending) {
 			if (_prev) {
 				_prev->_next = _next;
@@ -142,6 +161,8 @@ void EventResponder::detach()
 		}
 		_type = EventTypeDetached;
 	} else if (_type == EventTypeInterrupt) {
+		EventResponder *&firstInterrupt = _responders_interrupt[_priority].first;
+		EventResponder *&lastInterrupt = _responders_interrupt[_priority].last;
 		if (_pending) {
 			if (_prev) {
 				_prev->_next = _next;

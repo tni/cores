@@ -54,6 +54,11 @@ public:
 		EventTypeInterrupt,    // function is called from interrupt
 		EventTypeThread        // function is run as a new thread
 	};
+	enum EventPriority {
+		PriorityLow = 0,
+		PriorityMedium,
+		PriorityHigh
+	};
 	void attach(EventResponderFunction function) {
 		detach();
 		_function = function;
@@ -90,7 +95,19 @@ public:
 	void * getData() { return _data; }
 	bool waitForEvent(EventResponderRef event, int timeout);
 	EventResponder * waitForEvent(EventResponder *list, int listsize, int timeout);
+	void setPriority(EventPriority priority) { _priority = priority; }
+	EventPriority getPriority() { return _priority; }
 	static void runFromYield() {
+		if(!runFromYield(PriorityHigh))
+			if(!runFromYield(PriorityMedium))
+				runFromYield(PriorityLow);
+	}
+
+	static void runFromInterrupt();
+	operator bool() { return _pending; }
+protected:
+	static bool runFromYield(EventPriority priority) {
+		EventResponder *&firstYield = _responders_yield[priority].first;
 		EventResponder *first = firstYield;
 		if (first && !runningFromYield) {
 			runningFromYield = true;
@@ -99,11 +116,11 @@ public:
 			first->_pending = false;
 			(*(first->_function))(*first);
 			runningFromYield = false;
+			return true;
 		}
+		return false;
 	}
-	static void runFromInterrupt();
-	operator bool() { return _pending; }
-protected:
+	static void runFromInterrupt(EventPriority priority);
 	void triggerEventNotImmediate();
 	int _status = 0;
 	EventResponderFunction _function = nullptr;
@@ -112,11 +129,14 @@ protected:
 	EventResponder *_next = nullptr;
 	EventResponder *_prev = nullptr;
 	EventType _type = EventTypeDetached;
+	EventPriority _priority = PriorityLow;
 	bool _pending = false;
-	static EventResponder *firstYield;
-	static EventResponder *lastYield;
-	static EventResponder *firstInterrupt;
-	static EventResponder *lastInterrupt;
+	struct EventResponderList {
+		EventResponder *first;
+		EventResponder *last;
+	};
+	static EventResponderList _responders_yield[3];
+	static EventResponderList _responders_interrupt[3];
 	static bool runningFromYield;
 };
 
